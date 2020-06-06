@@ -1,0 +1,6 @@
+[submodule "submodules/imgui"]
+	path = submodules/imgui
+	url = https://github.com/ocornut/imgui
+[submodule "submodules/rwqueue"]
+	path = submodules/rwqueue
+	url = https://github.com/cameron314/readerwriterqueue
