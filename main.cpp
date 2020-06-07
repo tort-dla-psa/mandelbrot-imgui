@@ -202,6 +202,15 @@ int main(int, char**) {
         GLuint id;
         int x, y, w, h;
     };
+    GLuint id;
+    GLubyte raw[1920*1080*3]{128};
+    glGenTextures(1, &id);
+    glBindTexture(GL_TEXTURE_2D, id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); //scale linearly when image bigger than texture
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); //scale linearly when image smalled than texture
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, 1920, 1080, 0, GL_RGB, GL_UNSIGNED_BYTE, &raw);
+    glBindTexture(GL_TEXTURE_2D, 0);
     std::vector<texture> lines;
     while (!done) {
         // Poll and handle events (inputs, window resize, etc.)
@@ -245,6 +254,7 @@ int main(int, char**) {
 
         auto size = ImGui::GetIO().DisplaySize;
         lines.resize(t.lines);
+        auto drawList = ImGui::GetBackgroundDrawList();
         if(imgs.try_dequeue(i)){
             do{
                 auto &line = lines.at(i.line_no);
@@ -252,12 +262,11 @@ int main(int, char**) {
                 line.y = i.y;
                 line.w = i.w;
                 line.h = i.h;
-                glGenTextures(1, &line.id);
-                glBindTexture(GL_TEXTURE_2D, line.id);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); //scale linearly when image bigger than texture
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); //scale linearly when image smalled than texture
-                glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, i.w, i.h, 0, GL_RGB, GL_UNSIGNED_BYTE, i.pixels.data());
+                glBindTexture(GL_TEXTURE_2D, id);
+                glTexSubImage2D(GL_TEXTURE_2D, 0, i.x, i.y,
+                        i.w, i.h, GL_RGB8, GL_UNSIGNED_BYTE,
+                        i.pixels.data());
+                glBindTexture(GL_TEXTURE_2D, 0);
             }while(imgs.try_dequeue(i));
             std::cout<<"got imgs, sending task"<<std::endl;
             t.img_x_min = x_zoom - (x_zoom - t.img_x_min)/zoom_fact;
@@ -266,13 +275,15 @@ int main(int, char**) {
             t.img_y_max = y_zoom + (t.img_y_max - y_zoom)/zoom_fact;
             tasks.enqueue(t);
         }
-        auto drawList = ImGui::GetBackgroundDrawList();
+        drawList->AddImage((void*)(intptr_t)id, ImVec2(0,0), ImVec2(1920, 1080));
+        /*
         for(auto &line:lines){
             drawList->AddImage((void*)(intptr_t)line.id, ImVec2(line.x, line.y), ImVec2(line.w, line.h));
             drawList->AddText(ImGui::GetFont(), ImGui::GetFontSize()*2.0f, ImVec2(line.x, line.y), IM_COL32_WHITE,
                 "Line");
             std::cout<<"id:"<<line.id<<" x:"<<line.x<<" y:"<<line.y<<" w:"<<line.w<<" h:"<<line.h<<std::endl;
-        }
+        }*/
+
 
         // Rendering
         ImGui::Render();
