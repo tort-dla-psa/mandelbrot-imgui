@@ -1,6 +1,7 @@
 #pragma once
 #include <bits/stdint-uintn.h>
 #include <complex>
+#include <initializer_list>
 #include <type_traits>
 #include <vector>
 #include <iostream>
@@ -15,9 +16,31 @@ template<class FP>
 class mand_generator{
     void func();
 public:
+    struct color{
+        uint8_t r,g,b;
+        color(){}
+        color(std::initializer_list<float> lst){
+            assert(lst.size() == 3);
+            r = 255* *(lst.begin()+0);
+            g = 255* *(lst.begin()+1);
+            b = 255* *(lst.begin()+2);
+        }
+        color(std::initializer_list<uint8_t> lst){
+            assert(lst.size() == 3);
+            r = *(lst.begin()+0);
+            g = *(lst.begin()+1);
+            b = *(lst.begin()+2);
+        }
+        bool operator==(const color &rhs)const{
+            return r == rhs.r &&
+                g == rhs.g &&
+                b == rhs.b;
+        }
+    };
     struct task{
         FP x_min, x_max, y_min, y_max;
-        unsigned lines, threads;
+        color belongs, not_belongs;
+        unsigned lines, threads, iters;
         unsigned w, h;
         bool operator==(const task &rhs)const{
             return x_max == rhs.x_max &&
@@ -25,7 +48,10 @@ public:
                 y_max == rhs.y_max &&
                 y_min == rhs.y_min &&
                 w == rhs.w &&
-                h == rhs.h;
+                h == rhs.h &&
+                iters ==  rhs.iters &&
+                belongs == rhs.belongs &&
+                not_belongs == rhs.not_belongs;
         }
     };
 
@@ -80,7 +106,7 @@ void mand_generator<FP>::stop(){
 template<class FP>
 void mand_generator<FP>::func(){
     task prev_t;
-    auto mand = [](const FP &x, const FP &y, const size_t &lim)->uint8_t{
+    auto mand = [](const FP &x, const FP &y, const unsigned &lim)->float{
         const std::complex<FP> point(x, y);
         std::complex<FP> z(0, 0);
         size_t cnt = 0;
@@ -88,28 +114,29 @@ void mand_generator<FP>::func(){
             z = z * z + point;
             cnt++;
         }
-        if (cnt < lim) return 255;
-        else return 50;
+        return cnt*1./lim;
     };
-    auto calc_line = [&mand](auto y, auto w, auto h, auto line_h,
-        FP x_min, FP x_max, FP y_min, FP y_max)
-    {
+    auto calc_line = [&mand](auto y, auto w, auto h, auto line_h, const task &t)->image{
         image img;
         img.x = 0;
         img.y = y;
         img.w = w;
         img.h = line_h;
         auto &pixels = img.pixels;
-        FP map_x = (x_max - x_min)/w;
-        FP map_y = (y_max - y_min)/h;
+        FP map_x = (t.x_max - t.x_min)/w;
+        FP map_y = (t.y_max - t.y_min)/h;
         for(size_t j = y; j<y+line_h; j++){
-            FP y_map = j*map_y + y_min;
+            FP y_map = j*map_y + t.y_min;
             for(size_t i = 0; i<w; i++){
-                FP x_map = i*map_x + x_min;
-                auto clr = mand(x_map, y_map, 42);
-                pixels.emplace_back(clr);
-                pixels.emplace_back(0);
-                pixels.emplace_back(0);
+                FP x_map = i*map_x + t.x_min;
+                auto fract = mand(x_map, y_map, t.iters);
+                GLubyte r,g,b;
+                r = fract>0.5?t.belongs.r*fract : t.not_belongs.r*(1-fract);
+                g = fract>0.5?t.belongs.g*fract : t.not_belongs.g*(1-fract);
+                b = fract>0.5?t.belongs.b*fract : t.not_belongs.b*(1-fract);
+                pixels.emplace_back(r);
+                pixels.emplace_back(g);
+                pixels.emplace_back(b);
             }
         }
         return img;
@@ -129,8 +156,7 @@ void mand_generator<FP>::func(){
             std::vector<std::future<image>> results;
             for(auto l = line_beg; l < t.lines; l+=2){
                 auto ftr = tp.emplace(calc_line, l*line_h,
-                    t.w, t.h, line_h,
-                    t.x_min, t.x_max, t.y_min, t.y_max);
+                    t.w, t.h, line_h, t);
                 results.emplace_back(std::move(ftr));
             }
             for (auto& ftr:results){

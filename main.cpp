@@ -5,6 +5,7 @@
 #include "submodules/imgui/examples/imgui_impl_opengl3.h"
 #include "submodules/rwqueue/readerwriterqueue.h"
 #include <SDL.h>
+#include <string>
 #include <tuple>
 #include <vector>
 #include <complex>
@@ -14,7 +15,28 @@
 #include <GL/glew.h>
 #include "mand_generator.h"
 
-using mand_gen_ = mand_generator<double>;
+using T = double;
+using mand_gen_ = mand_generator<T>;
+
+auto make_task(T x_min, T x_max, T y_min, T y_max,
+        unsigned threads, unsigned lines, unsigned limit,
+        unsigned w, unsigned h,
+        ImVec4 bel, ImVec4 not_bel)
+{
+    mand_gen_::task t;
+    t.belongs = mand_gen_::color{bel.x, bel.y, bel.z};
+    t.not_belongs = mand_gen_::color{not_bel.x, not_bel.y, not_bel.z};
+    t.w = w;
+    t.h = h;
+    t.x_min = x_min;
+    t.x_max = x_max;
+    t.y_min = y_min;
+    t.y_max = y_max;
+    t.threads = threads;
+    t.lines = lines;
+    t.iters = limit;
+    return t;
+}
 
 int main(int, char**) {
     mand_gen_::task_q tasks(1);
@@ -22,21 +44,49 @@ int main(int, char**) {
     mand_gen_ gen(tasks, imgs);
     gen.run();
 
-    const unsigned w = 1080, h = 1920;
-    double x_zoom = 0;
-    double y_zoom = 0;
-    double zoom_fact = 1.0;
-    bool first_zoom = true, zoom = false;
-    mand_gen_::task t;
-    t.x_max = 1.5;
-    t.y_max = 1.5;
-    t.x_min = -1.5;
-    t.y_min = -1.5;
-    t.lines = 10;
-    t.threads = 4;
-    t.w = w;
-    t.h = h;
+    const unsigned w = 1920, h = 1080;
+    ImVec4 def_belongs = ImVec4(0.f, 0.f, 0.f, 1.00f);
+    ImVec4 def_not_belongs = ImVec4(0.5f, 0.2f, 0.3f, 1.00f);
+    T def_x_max = 1.5;
+    T def_y_max = 1.5;
+    T def_x_min = -1.5;
+    T def_y_min = -1.5;
+    unsigned def_lines = 50;
+    unsigned def_threads = 4;
+    unsigned def_iters = 42;
+    auto t = make_task(def_x_min, def_x_max, def_y_min, def_y_max,
+            def_threads, def_lines, def_iters,
+            w, h, def_belongs, def_not_belongs);
     tasks.enqueue(t);
+    auto reset = [&def_belongs, &def_not_belongs,
+        &def_x_max, &def_y_max, &def_x_min, &def_y_min,
+        &w, &h, &t,
+        &def_lines, &def_threads, &def_iters]
+    {
+        t = make_task(def_x_min, def_x_max, def_y_min, def_y_max,
+                def_threads, def_lines, def_iters,
+                w, h, def_belongs, def_not_belongs);
+    };
+
+    auto belongs = def_belongs;
+    auto not_belongs = def_not_belongs;
+    auto x_max=def_x_max;
+    auto y_max=def_y_max;
+    auto x_min=def_x_min;
+    auto y_min=def_y_min;
+    auto lines=def_lines;
+    auto threads=def_threads;
+    auto iters=def_iters;
+    auto update = [&belongs, &not_belongs,
+        &x_max, &y_max, &x_min, &y_min,
+        &w, &h, &t,
+        &lines, &threads, &iters]
+    {
+        t = make_task(x_min, x_max, y_min, y_max,
+                threads, lines, iters,
+                w, h, belongs, not_belongs);
+    };
+
     // Setup SDL
     // (Some versions of SDL before <2.0.10 appears to have performance/stalling issues on a minority of Windows systems,
     // depending on whether SDL_INIT_GAMECONTROLLER is enabled or disabled.. updating to latest version of SDL is recommended!)
@@ -94,9 +144,6 @@ int main(int, char**) {
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
     ImGui_ImplOpenGL3_Init(glsl_version);
 
-    // Our state
-    ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
-
     // Main loop
     bool done = false;
     GLuint id;
@@ -109,6 +156,7 @@ int main(int, char**) {
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, &raw);
     glBindTexture(GL_TEXTURE_2D, 0);
+    bool iter_incr = true;
 
     ImVec2 drag_1, drag_2;
     bool drag_beg;
@@ -128,16 +176,28 @@ int main(int, char**) {
         ImGui::NewFrame();
         auto drawList = ImGui::GetBackgroundDrawList();
 
-        // 2. Show a simple window that we create ourselves. We use a Begin/End pair to created a named window.
-        ImGui::Begin("Hello, world!");                          // Create a window called "Hello, world!" and append into it.
-        ImGui::ColorEdit3("clear color", (float*)&clear_color); // Edit 3 floats representing a color
+        ImGui::Begin("Parameters");
+        ImGui::ColorEdit3("Belongs", (float*)&belongs); ImGui::SameLine();
+        if(ImGui::Button("Reset")){ belongs = def_belongs; update(); }
+        ImGui::ColorEdit3("Not belongs", (float*)&not_belongs); ImGui::SameLine();
+        if(ImGui::Button("Reset")){ not_belongs = def_not_belongs; update(); }
+        ImGui::InputInt("Lines:", (int*)&lines); ImGui::SameLine();
+        if(ImGui::Button("Reset")){ x_min = def_x_min; update(); }
+        ImGui::InputInt("Threads:", (int*)&threads); ImGui::SameLine();
+        if(ImGui::Button("Reset")){ x_min = def_x_min; update(); }
+        ImGui::InputInt("Iters:", (int*)&iters); ImGui::SameLine();
+        if(ImGui::Button("Reset")){ x_min = def_x_min; update(); }
+        ImGui::InputDouble("X1:", &x_min); ImGui::SameLine();
+        if(ImGui::Button("Reset")){ x_min = def_x_min; update(); }
+        ImGui::InputDouble("Y1:", &y_min); ImGui::SameLine();
+        if(ImGui::Button("Reset")){ y_min = def_y_min; update(); }
+        ImGui::InputDouble("X2:", &x_max); ImGui::SameLine();
+        if(ImGui::Button("Reset")){ x_max = def_x_max; update(); }
+        ImGui::InputDouble("Y2:", &y_max); ImGui::SameLine();
+        if(ImGui::Button("Reset")){ y_max = def_y_max; update(); }
+        if(ImGui::Button("Reset all")){ reset(); } ImGui::SameLine();
+        if(ImGui::Button("Update")){ update(); }
         ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
-        ImGui::InputInt("Lines:", (int*)&t.lines);
-        ImGui::InputInt("Threads:", (int*)&t.threads);
-        ImGui::InputDouble("X1:", &t.x_min);
-        ImGui::InputDouble("Y1:", &t.y_min);
-        ImGui::InputDouble("X2:", &t.x_max);
-        ImGui::InputDouble("Y2:", &t.y_max);
         ImGui::End();
         mand_gen_::image i;
         if(ImGui::IsMouseClicked(0)){
@@ -148,21 +208,32 @@ int main(int, char**) {
         {
             drag_beg = true;
         }
+        if(drag_beg){
+            drag_2 = ImGui::GetMousePos();
+        }
+        double x_beg = std::min(drag_1.x, drag_2.x);
+        double x_end = std::max(drag_1.x, drag_2.x);
+        double y_beg = std::min(drag_1.y, drag_2.y);
+        double y_end = std::max(drag_1.y, drag_2.y);
+        double x_min_bak = x_min;
+        double x_max_bak = x_max;
+        double y_min_bak = y_min;
+        double y_max_bak = y_max;
+        double x1_rel = x_beg/w;
+        double x2_rel = x_end/w;
+        double y1_rel = y_beg/h;
+        double y2_rel = y_end/h;
+        double new_x_min = (x_max_bak - x_min_bak)*x1_rel + x_min_bak;
+        double new_x_max = (x_max_bak - x_min_bak)*x2_rel + x_min_bak;
+        double new_y_min = (y_max_bak - y_min_bak)*y1_rel + y_min_bak;
+        double new_y_max = (y_max_bak - y_min_bak)*y2_rel + y_min_bak;
         if(ImGui::IsMouseReleased(0)){
             drag_2 = ImGui::GetMousePos();
             if(drag_beg){
-                double map_x = (t.x_max - t.x_min)/ImGui::GetWindowWidth();
-                double map_y = (t.y_max - t.y_min)/ImGui::GetWindowHeight();
-                auto x_beg = std::min(drag_1.x, drag_2.x);
-                auto x_end = std::max(drag_1.x, drag_2.x);
-                auto y_beg = std::min(drag_1.y, drag_2.y);
-                auto y_end = std::max(drag_1.y, drag_2.y);
-                auto x_min_bak = t.x_min;
-                auto y_min_bak = t.y_min;
-                t.x_min = x_beg*map_x + x_min_bak;
-                t.x_max = x_end*map_x + x_min_bak;
-                t.y_min = y_beg*map_y + y_min_bak;
-                t.y_max = y_end*map_y + y_min_bak;
+                x_min = new_x_min;
+                x_max = new_x_max;
+                y_min = new_y_min;
+                y_max = new_y_max;
             }
             drag_beg = false;
         }
@@ -177,16 +248,10 @@ int main(int, char**) {
                 glBindTexture(GL_TEXTURE_2D, 0);
             }while(imgs.try_dequeue(i));
         }
-        /*
-        if(zoom){
-            t.x_min = x_zoom - (x_zoom - t.x_min)/zoom_fact;
-            t.x_max = x_zoom + (t.x_max - x_zoom)/zoom_fact;
-            t.y_min = y_zoom - (y_zoom - t.y_min)/zoom_fact;
-            t.y_max = y_zoom + (t.y_max - y_zoom)/zoom_fact;
-        }*/
         tasks.enqueue(t);
         drawList->AddImage((void*)(intptr_t)id, ImVec2(0,0), ImVec2(1920, 1080));
         if(drag_beg){
+            auto str = [](double data){ return std::to_string(data).substr(0, 4); };
             auto x_beg = std::min(drag_1.x, ImGui::GetMousePos().x);
             auto x_end = std::max(drag_1.x, ImGui::GetMousePos().x);
             auto y_beg = std::min(drag_1.y, ImGui::GetMousePos().y);
@@ -197,7 +262,7 @@ int main(int, char**) {
         // Rendering
         ImGui::Render();
         glViewport(0, 0, (int)io.DisplaySize.x, (int)io.DisplaySize.y);
-        glClearColor(clear_color.x, clear_color.y, clear_color.z, clear_color.w);
+        glClearColor(not_belongs.x, not_belongs.y, not_belongs.z, not_belongs.w);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         SDL_GL_SwapWindow(window);
